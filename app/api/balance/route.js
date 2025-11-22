@@ -60,6 +60,20 @@ const getExplorerApiUrl = (chain, network) => {
   return 'https://api.etherscan.io/v2/api';
 };
 
+// Helper for rate-limited requests
+async function fetchWithRetry(url, config, retries = 3, backoff = 1000) {
+  try {
+    return await axios.get(url, config);
+  } catch (error) {
+    if (retries > 0 && error.response?.status === 429) {
+      console.warn(`Rate limited (429). Retrying in ${backoff}ms...`);
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      return fetchWithRetry(url, config, retries - 1, backoff * 2);
+    }
+    throw error;
+  }
+}
+
 async function getTronBlockNumberByTimestamp(network, timestamp) {
   // TronScan doesn't have exact timestamp lookup, so we search a range
   // Search 1 hour window around timestamp
@@ -75,11 +89,11 @@ async function getTronBlockNumberByTimestamp(network, timestamp) {
 
   const headers = apiKey ? { 'TRON-PRO-API-KEY': apiKey } : {};
 
-  const { data } = await axios.get(url, { headers });
+  const { data } = await fetchWithRetry(url, { headers });
   if (!data.data || data.data.length === 0) {
     // Try wider range or just end_timestamp
     const preciseUrl = `${baseUrl}/block?sort=-timestamp&limit=1&end_timestamp=${timestamp * 1000}`;
-    const { data: preciseData } = await axios.get(preciseUrl, { headers });
+    const { data: preciseData } = await fetchWithRetry(preciseUrl, { headers });
     if (!preciseData.data || preciseData.data.length === 0) {
       throw new Error('No Tron block found before this timestamp');
     }
@@ -224,7 +238,7 @@ async function getTronHistoricalBalance(address, network, targetTimestamp) {
     const headers = apiKey ? { 'TRON-PRO-API-KEY': apiKey } : {};
 
     try {
-      const { data } = await axios.get(url, { headers });
+      const { data } = await fetchWithRetry(url, { headers });
 
       if (!data.data || data.data.length === 0) {
         hasMore = false;
@@ -323,7 +337,7 @@ async function getTronTokenInfo(tokenAddress, network) {
   const headers = apiKey ? { 'TRON-PRO-API-KEY': apiKey } : {};
 
   try {
-    const { data } = await axios.get(`${baseUrl}/token_trc20?contract=${tokenAddress}`, { headers });
+    const { data } = await fetchWithRetry(`${baseUrl}/token_trc20?contract=${tokenAddress}`, { headers });
     if (data && data.trc20_tokens && data.trc20_tokens.length > 0) {
       return data.trc20_tokens[0];
     }
@@ -350,7 +364,7 @@ async function getTronTokenHistoricalBalance(address, tokenAddress, network, tar
     const headers = apiKey ? { 'TRON-PRO-API-KEY': apiKey } : {};
 
     try {
-      const { data } = await axios.get(url, { headers });
+      const { data } = await fetchWithRetry(url, { headers });
 
       if (!data.token_transfers || data.token_transfers.length === 0) {
         hasMore = false;
