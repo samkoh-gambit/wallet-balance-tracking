@@ -108,7 +108,8 @@ async function getBscBlockNumberByTimestamp(network, timestamp) {
 
   const latestBlock = await provider.getBlock('latest');
   if (latestBlock.timestamp < timestamp) {
-    throw new Error('Date is in the future');
+    console.warn('BSC Timestamp is in the future, falling back to latest block');
+    return latestBlock.number;
   }
 
   let min = 0;
@@ -174,6 +175,18 @@ async function getBlockNumberByTimestamp(chain, network, timestamp) {
 
   const { data } = await axios.get(url);
   if (data.status !== '1') {
+    // Handle "Block timestamp too far in the future" error
+    if (data.message === 'NOTOK' && data.result && data.result.includes('future')) {
+      console.warn('Timestamp is in the future, falling back to latest block');
+      // For Etherscan V2, we can't easily get "latest" via this endpoint, 
+      // but we can assume the user wants the current state.
+      // However, we need a block number. Let's fetch the latest block via RPC.
+      const rpcUrl = getRpcUrl(chain, network);
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const latestBlock = await provider.getBlockNumber();
+      return latestBlock;
+    }
+
     console.error(`Explorer API Error Response:`, data);
     throw new Error(`Explorer API error: ${data.message} (${data.result})`);
   }
@@ -222,13 +235,13 @@ async function getTronHistoricalBalance(address, network, targetTimestamp) {
       start += limit;
 
       // Safety limit: stop if we've fetched too many transactions
-      if (allTransactions.length > 10000) {
+      if (allTransactions.length >= 10000) {
         console.warn('Too many transactions, stopping at 10000');
         hasMore = false;
       }
     } catch (e) {
-      console.error('Error fetching Tron transactions:', e);
-      throw new Error(`Failed to fetch transactions: ${e.message}`);
+      console.error('Error fetching Tron transactions:', e.response?.data || e.message);
+      throw new Error(`Failed to fetch transactions: ${e.response?.status || e.message}`);
     }
   }
 
@@ -347,13 +360,13 @@ async function getTronTokenHistoricalBalance(address, tokenAddress, network, tar
       allTransfers.push(...data.token_transfers);
       start += limit;
 
-      if (allTransfers.length > 5000) { // Safety limit
+      if (allTransfers.length >= 5000) { // Safety limit
         console.warn('Too many token transfers, stopping at 5000');
         hasMore = false;
       }
     } catch (e) {
-      console.error('Error fetching TRC-20 transfers:', e);
-      throw new Error(`Failed to fetch token transfers: ${e.message}`);
+      console.error('Error fetching TRC-20 transfers:', e.response?.data || e.message);
+      throw new Error(`Failed to fetch token transfers: ${e.response?.status || e.message}`);
     }
   }
 
@@ -383,11 +396,15 @@ async function getTronTokenHistoricalBalance(address, tokenAddress, network, tar
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { address, chain = 'ethereum', network = 'mainnet', date, tokenAddress } = body;
+    let { address, chain = 'ethereum', network = 'mainnet', date, tokenAddress } = body;
 
     if (!address || !date) {
       return NextResponse.json({ error: 'Address and Date are required' }, { status: 400 });
     }
+
+    // Clean inputs
+    address = address.trim();
+    if (tokenAddress) tokenAddress = tokenAddress.trim();
 
     // Parse date to timestamp
     const ts = Math.floor(new Date(date).getTime() / 1000);
