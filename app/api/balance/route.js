@@ -61,7 +61,7 @@ const getExplorerApiUrl = (chain, network) => {
 };
 
 // Helper for rate-limited requests
-async function fetchWithRetry(url, config, retries = 3, backoff = 1000) {
+async function fetchWithRetry(url, config, retries = 5, backoff = 3000) {
   try {
     return await axios.get(url, config);
   } catch (error) {
