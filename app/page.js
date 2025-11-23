@@ -30,11 +30,17 @@ export default function Home() {
         setError(null);
         setResult(null);
 
+        // Convert local time to UTC before sending
+        const payload = { ...formData };
+        if (payload.date) {
+            payload.date = new Date(payload.date).toISOString();
+        }
+
         try {
             const res = await fetch('/api/balance', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(payload),
             });
 
             const data = await res.json();
@@ -72,7 +78,7 @@ export default function Home() {
 
                     <div className="form-group">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <label htmlFor="date" style={{ marginBottom: 0 }}>Date & Time</label>
+                            <label htmlFor="date" style={{ marginBottom: 0 }}>Date & Time (Local)</label>
                             <button
                                 type="button"
                                 onClick={setCurrentTime}
@@ -98,6 +104,9 @@ export default function Home() {
                             value={formData.date}
                             onChange={handleChange}
                         />
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', textAlign: 'right' }}>
+                            Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                        </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
