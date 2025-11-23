@@ -30,11 +30,17 @@ export default function Home() {
         setError(null);
         setResult(null);
 
+        // Convert local time to UTC before sending
+        const payload = { ...formData };
+        if (payload.date) {
+            payload.date = new Date(payload.date).toISOString();
+        }
+
         try {
             const res = await fetch('/api/balance', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
+                body: JSON.stringify(payload),
             });
 
             const data = await res.json();
@@ -54,7 +60,7 @@ export default function Home() {
     return (
         <main className="container">
             <div className="card">
-                <h1>Wallet Time Machine</h1>
+                <h1>Wallet Balance Explorer</h1>
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
@@ -63,7 +69,7 @@ export default function Home() {
                             id="address"
                             name="address"
                             type="text"
-                            placeholder="0x..."
+                            placeholder={formData.chain === 'tron' ? 'T...' : '0x...'}
                             required
                             value={formData.address}
                             onChange={handleChange}
@@ -72,7 +78,7 @@ export default function Home() {
 
                     <div className="form-group">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <label htmlFor="date" style={{ marginBottom: 0 }}>Date & Time</label>
+                            <label htmlFor="date" style={{ marginBottom: 0 }}>Date & Time (Local)</label>
                             <button
                                 type="button"
                                 onClick={setCurrentTime}
@@ -98,30 +104,37 @@ export default function Home() {
                             value={formData.date}
                             onChange={handleChange}
                         />
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem', textAlign: 'right' }}>
+                            Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                        </div>
+                    </div>
+
+                    <div className="form-group">
+                        <label>Chain</label>
+                        <div className="chain-grid">
+                            {[
+                                { id: 'ethereum', name: 'Ethereum', icon: '/icons/ethereum.png' },
+                                { id: 'polygon', name: 'Polygon', icon: '/icons/polygon.png' },
+                                { id: 'bsc', name: 'BSC', icon: '/icons/bsc.png' },
+                                { id: 'tron', name: 'Tron', icon: '/icons/tron.png' }
+                            ].map((chain) => (
+                                <div
+                                    key={chain.id}
+                                    className={`chain-option ${formData.chain === chain.id ? 'selected' : ''}`}
+                                    onClick={() => {
+                                        let defaultNetwork = 'mainnet';
+                                        if (chain.id === 'tron') defaultNetwork = 'mainnet';
+                                        setFormData({ ...formData, chain: chain.id, network: defaultNetwork });
+                                    }}
+                                >
+                                    <img src={chain.icon} alt={chain.name} className="chain-icon" />
+                                    <span className="chain-name">{chain.name}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <div className="form-group">
-                            <label htmlFor="chain">Chain</label>
-                            <select
-                                id="chain"
-                                name="chain"
-                                value={formData.chain}
-                                onChange={(e) => {
-                                    // Reset network when chain changes
-                                    const newChain = e.target.value;
-                                    let defaultNetwork = 'mainnet';
-                                    if (newChain === 'tron') defaultNetwork = 'mainnet';
-                                    setFormData({ ...formData, chain: newChain, network: defaultNetwork });
-                                }}
-                            >
-                                <option value="ethereum">Ethereum</option>
-                                <option value="polygon">Polygon</option>
-                                <option value="bsc">BSC</option>
-                                <option value="tron">Tron</option>
-                            </select>
-                        </div>
-
                         <div className="form-group">
                             <label htmlFor="network">Network</label>
                             <select
@@ -136,44 +149,69 @@ export default function Home() {
                                 {formData.chain === 'bsc' && <option value="testnet">Testnet</option>}
                                 {formData.chain === 'tron' && <option value="shasta">Shasta</option>}
                             </select>
-                        </div>            </div>
-
-                    <div className="form-group">
-                        <label htmlFor="tokenAddress">Token Address (Optional)</label>
-                        <input
-                            id="tokenAddress"
-                            name="tokenAddress"
-                            type="text"
-                            placeholder="Leave empty for native balance"
-                            value={formData.tokenAddress}
-                            onChange={handleChange}
-                        />
-                    </div>
-
-                    <button type="submit" disabled={loading}>
-                        {loading ? <div className="spinner"></div> : 'Check Balance'}
-                    </button>
-                </form>
-
-                {error && <div className="error">{error}</div>}
-
-                {result && (
-                    <div className="result">
-                        <div className="result-item">
-                            <span className="result-label">Balance</span>
-                            <span className="result-value">{result.balance} {result.symbol}</span>
                         </div>
-                        <div className="result-item">
-                            <span className="result-label">Block Number</span>
-                            <span className="result-value">#{result.blockNumber}</span>
-                        </div>
-                        <div className="result-item">
-                            <span className="result-label">Timestamp</span>
-                            <span className="result-value">{new Date(result.timestamp * 1000).toLocaleString('en-GB')}</span>
+
+                        <div className="form-group">
+                            <label htmlFor="tokenAddress">Token Address (Optional)</label>
+                            <input
+                                id="tokenAddress"
+                                name="tokenAddress"
+                                type="text"
+                                placeholder="Native if empty"
+                                value={formData.tokenAddress}
+                                onChange={handleChange}
+                            />
                         </div>
                     </div>
-                )}
-            </div>
-        </main>
+
+
+
+                    <div className="btn-group">
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => {
+                                setFormData({
+                                    address: '',
+                                    date: '',
+                                    chain: 'ethereum',
+                                    network: 'mainnet',
+                                    tokenAddress: ''
+                                });
+                                setResult(null);
+                                setError(null);
+                            }}
+                        >
+                            Clear
+                        </button>
+                        <button type="submit" disabled={loading}>
+                            {loading ? <div className="spinner"></div> : 'Check Balance'}
+                        </button>
+                    </div>
+                </form >
+
+                {error && <div className="error">{error}</div>
+                }
+
+                {
+                    result && (
+                        <div className="result">
+                            <div className="result-item">
+                                <span className="result-label">Balance</span>
+                                <span className="result-value">{result.balance} {result.symbol}</span>
+                            </div>
+                            <div className="result-item">
+                                <span className="result-label">Block Number</span>
+                                <span className="result-value">#{result.blockNumber}</span>
+                            </div>
+                            <div className="result-item">
+                                <span className="result-label">Timestamp</span>
+                                <span className="result-value">{new Date(result.timestamp * 1000).toLocaleString('en-GB')}</span>
+                            </div>
+                        </div>
+                    )
+                }
+            </div >
+        </main >
     );
 }
