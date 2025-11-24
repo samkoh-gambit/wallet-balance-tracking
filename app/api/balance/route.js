@@ -74,6 +74,26 @@ async function fetchWithRetry(url, config, retries = 5, backoff = 3000) {
   }
 }
 
+async function retryRpcCall(fn, retries = 10, delay = 2000) {
+  try {
+    return await fn();
+  } catch (error) {
+    // Check for Alchemy specific error: "state histories haven't been fully indexed yet"
+    // Ethers.js might wrap the error, so we check the message string or nested error objects
+    const errorMessage = error.message || JSON.stringify(error);
+    const isIndexingError = errorMessage.includes("state histories haven't been fully indexed yet") ||
+      (error?.info?.error?.code === -32000) ||
+      (error?.error?.code === -32000);
+
+    if (retries > 0 && isIndexingError) {
+      console.warn(`RPC Indexing Error (-32000). Retrying in ${delay}ms... (Retries left: ${retries})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return retryRpcCall(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
 async function getTronBlockNumberByTimestamp(network, timestamp) {
   // TronScan doesn't have exact timestamp lookup, so we search a range
   // Search 1 hour window around timestamp
@@ -495,7 +515,7 @@ export async function POST(request) {
         'function symbol() view returns (string)'
       ];
       const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-      balanceWei = await contract.balanceOf(address, { blockTag: blockNumber });
+      balanceWei = await retryRpcCall(() => contract.balanceOf(address, { blockTag: blockNumber }));
 
       try {
         const [dec, sym] = await Promise.all([
@@ -511,7 +531,7 @@ export async function POST(request) {
       }
     } else {
       // Native Balance
-      balanceWei = await provider.getBalance(address, blockNumber);
+      balanceWei = await retryRpcCall(() => provider.getBalance(address, blockNumber));
       var balanceFormatted = ethers.formatEther(balanceWei);
     }
 

@@ -20,7 +20,7 @@ export default function Home() {
 
     const setCurrentTime = () => {
         const now = new Date();
-        const localIso = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        const localIso = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 19);
         setFormData(prev => ({ ...prev, date: localIso }));
     };
 
@@ -100,6 +100,7 @@ export default function Home() {
                             id="date"
                             name="date"
                             type="datetime-local"
+                            step="1"
                             required
                             value={formData.date}
                             onChange={handleChange}
