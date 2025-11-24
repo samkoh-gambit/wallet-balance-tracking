@@ -208,10 +208,13 @@ async function getBlockNumberByTimestamp(chain, network, timestamp) {
   // console.log(`Fetching block number from Explorer: ${url}`);
 
   const { data } = await axios.get(url);
-  if (data.status !== '1') {
-    // Handle "Block timestamp too far in the future" error
-    if (data.message === 'NOTOK' && data.result && data.result.includes('future')) {
-      console.warn('Timestamp is in the future, falling back to latest block');
+  // console.log(`[BalanceAPI] Explorer URL: ${url}`);
+  // console.log(`[BalanceAPI] Explorer Response Status: ${data.status}, Message: ${data.message}, Result: ${data.result}`);
+
+  if (data.status !== '1' || data.message === 'NOTOK' || (typeof data.result === 'string' && data.result.startsWith('Error'))) {
+    // Handle "Block timestamp too far in the future" or "No closest block found" error
+    if (data.result && (data.result.includes('future') || data.result.includes('No closest block found'))) {
+      console.warn('Timestamp is in the future or not found, falling back to latest block');
       // For Etherscan V2, we can't easily get "latest" via this endpoint, 
       // but we can assume the user wants the current state.
       // However, we need a block number. Let's fetch the latest block via RPC.
@@ -224,7 +227,12 @@ async function getBlockNumberByTimestamp(chain, network, timestamp) {
     console.error(`Explorer API Error Response:`, data);
     throw new Error(`Explorer API error: ${data.message} (${data.result})`);
   }
-  return Number(data.result);
+
+  const blockNum = Number(data.result);
+  if (isNaN(blockNum)) {
+    console.error(`[BalanceAPI] Invalid block number from explorer: ${data.result}`);
+  }
+  return blockNum;
 }
 
 async function getTronBlockHashByNumber(network, blockNumber) {
@@ -442,9 +450,19 @@ export async function POST(request) {
 
     // Parse date to timestamp
     const ts = Math.floor(new Date(date).getTime() / 1000);
+    // console.log(`[BalanceAPI] Date: ${date}, Timestamp: ${ts}`);
+
+    if (isNaN(ts)) {
+      return NextResponse.json({ error: 'Invalid Date' }, { status: 400 });
+    }
 
     // Get Block Number
     const blockNumber = await getBlockNumberByTimestamp(chain, network, ts);
+    // console.log(`[BalanceAPI] Chain: ${chain}, BlockNumber: ${blockNumber}`);
+
+    if (isNaN(blockNumber)) {
+      throw new Error(`Failed to get valid block number. Got: ${blockNumber}`);
+    }
 
     // Setup Provider
     const rpcUrl = getRpcUrl(chain, network);
@@ -516,6 +534,7 @@ export async function POST(request) {
       ];
       const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
       balanceWei = await retryRpcCall(() => contract.balanceOf(address, { blockTag: blockNumber }));
+      // console.log(`[BalanceAPI] ERC20 BalanceWei: ${balanceWei} (Type: ${typeof balanceWei})`);
 
       try {
         const [dec, sym] = await Promise.all([
@@ -532,6 +551,7 @@ export async function POST(request) {
     } else {
       // Native Balance
       balanceWei = await retryRpcCall(() => provider.getBalance(address, blockNumber));
+      // console.log(`[BalanceAPI] Native BalanceWei: ${balanceWei} (Type: ${typeof balanceWei})`);
       var balanceFormatted = ethers.formatEther(balanceWei);
     }
 
