@@ -74,7 +74,7 @@ async function fetchWithRetry(url, config, retries = 5, backoff = 3000) {
   }
 }
 
-async function retryRpcCall(fn, retries = 10, delay = 2000) {
+async function retryRpcCall(fn, retries = 5, delay = 2000) {
   try {
     return await fn();
   } catch (error) {
@@ -85,10 +85,13 @@ async function retryRpcCall(fn, retries = 10, delay = 2000) {
       (error?.info?.error?.code === -32000) ||
       (error?.error?.code === -32000);
 
-    if (retries > 0 && isIndexingError) {
-      console.warn(`RPC Indexing Error (-32000). Retrying in ${delay}ms... (Retries left: ${retries})`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return retryRpcCall(fn, retries - 1, delay * 2);
+    if (isIndexingError) {
+      if (retries > 0) {
+        console.warn(`RPC Indexing Error (-32000). Retrying in ${delay}ms... (Retries left: ${retries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return retryRpcCall(fn, retries - 1, delay * 2);
+      }
+      throw new Error("RPC returned indexing error, please try again later");
     }
     throw error;
   }
