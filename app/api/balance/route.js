@@ -44,6 +44,13 @@ const getRpcUrl = (chain, network) => {
       : `https://bnb-testnet.g.alchemy.com/v2/${alchemyKey}`;
   }
 
+  if (chain === 'bitcoin' || chain === 'litecoin') {
+    // Bitquery doesn't use a standard RPC URL in the same way, 
+    // but we can return the GraphQL endpoint here if needed, 
+    // or just handle it in the specific functions.
+    return 'https://graphql.bitquery.io';
+  }
+
   throw new Error(`Unsupported chain: ${chain}`);
 };
 
@@ -195,6 +202,10 @@ async function getBlockNumberByTimestamp(chain, network, timestamp) {
 
   if (chain === 'bsc') {
     return getBscBlockNumberByTimestamp(network, timestamp);
+  }
+
+  if (chain === 'bitcoin' || chain === 'litecoin') {
+    return getBitqueryBlockNumberByTimestamp(chain, timestamp);
   }
 
   const apiKey = getApiKey(chain);
@@ -438,6 +449,149 @@ async function getTronTokenHistoricalBalance(address, tokenAddress, network, tar
   return balance;
 }
 
+// Helper to determine Bitquery headers
+function getBitqueryHeaders(apiKey) {
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  // Check for V2 OAuth token (starts with 'ory_' or 'Bearer ')
+  if (apiKey.startsWith('ory_') || apiKey.startsWith('Bearer ')) {
+    headers['Authorization'] = apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}`;
+  } else {
+    // Default to V1 API Key
+    headers['X-API-KEY'] = apiKey;
+  }
+  return headers;
+}
+
+async function getBitqueryBlockNumberByTimestamp(chain, timestamp) {
+  const endpoint = 'https://graphql.bitquery.io';
+  const apiKey = process.env.BITQUERY_ACCESS_TOKEN;
+
+  if (!apiKey) throw new Error('BITQUERY_ACCESS_TOKEN is missing');
+
+  const isoTime = new Date(timestamp * 1000).toISOString();
+  // Bitquery uses 'bitcoin' schema for both, but we specify network
+  // network: bitcoin or litecoin
+  const network = chain === 'bitcoin' ? 'bitcoin' : 'litecoin';
+
+  const query = `
+    query ($network: BitcoinNetwork!, $time: ISO8601DateTime!) {
+      bitcoin(network: $network) {
+        blocks(options: {limit: 1, desc: "height"}, time: {till: $time}) {
+          height
+          timestamp {
+            iso8601
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const { data } = await axios.post(
+      endpoint,
+      {
+        query,
+        variables: { network, time: isoTime }
+      },
+      {
+        headers: getBitqueryHeaders(apiKey)
+      }
+    );
+
+    if (data.errors) {
+      throw new Error(`Bitquery Error: ${JSON.stringify(data.errors)}`);
+    }
+
+    const blocks = data.data?.bitcoin?.blocks;
+    if (!blocks || blocks.length === 0) {
+      throw new Error(`No ${chain} block found for this timestamp`);
+    }
+
+    return blocks[0].height;
+  } catch (e) {
+    console.error(`Error fetching ${chain} block number:`, e.response?.data || e.message);
+    // console.log('Used API Key prefix:', apiKey.substring(0, 5) + '...');
+    throw e;
+  }
+}
+
+async function getBitqueryHistoricalBalance(chain, address, timestamp) {
+  const endpoint = 'https://graphql.bitquery.io';
+  const apiKey = process.env.BITQUERY_ACCESS_TOKEN;
+
+  if (!apiKey) throw new Error('BITQUERY_ACCESS_TOKEN is missing');
+
+  const isoTime = new Date(timestamp * 1000).toISOString();
+  const network = chain === 'bitcoin' ? 'bitcoin' : 'litecoin';
+
+  // We calculate balance by summing all outputs (received) and subtracting all inputs (spent)
+  // up to the target timestamp.
+  const query = `
+    query ($network: BitcoinNetwork!, $address: String!, $time: ISO8601DateTime!) {
+      bitcoin(network: $network) {
+        outputs(
+          date: {till: $time}
+          outputAddress: {is: $address}
+          options: {limit: 10000}
+        ) {
+          value
+        }
+        inputs(
+          date: {till: $time}
+          inputAddress: {is: $address}
+          options: {limit: 10000}
+        ) {
+          value
+        }
+      }
+    }
+  `;
+
+  try {
+    const { data } = await axios.post(
+      endpoint,
+      {
+        query,
+        variables: { network, address, time: isoTime }
+      },
+      {
+        headers: getBitqueryHeaders(apiKey)
+      }
+    );
+
+    if (data.errors) {
+      throw new Error(`Bitquery Error: ${JSON.stringify(data.errors)}`);
+    }
+
+    const outputs = data.data?.bitcoin?.outputs || [];
+    const inputs = data.data?.bitcoin?.inputs || [];
+
+    // Sum up values
+    // Note: Bitquery returns value in BTC/LTC (float) usually.
+
+    let totalReceived = 0;
+    for (const out of outputs) {
+      totalReceived += out.value;
+    }
+
+    let totalSent = 0;
+    for (const inp of inputs) {
+      totalSent += inp.value;
+    }
+
+    const balance = totalReceived - totalSent;
+
+    return balance;
+
+  } catch (e) {
+    console.error(`Error fetching ${chain} balance:`, e.response?.data || e.message);
+    throw e;
+  }
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -475,6 +629,34 @@ export async function POST(request) {
     let symbol = 'ETH'; // Default
     if (chain === 'polygon') symbol = 'MATIC';
     if (chain === 'bsc') symbol = 'BNB';
+    if (chain === 'bsc') symbol = 'BNB';
+    if (chain === 'bitcoin') symbol = 'BTC';
+    if (chain === 'litecoin') symbol = 'LTC';
+
+    if (chain === 'bitcoin' || chain === 'litecoin') {
+      try {
+        const historicalBlockNumber = await getBlockNumberByTimestamp(chain, network, ts);
+
+        // Bitquery returns balance in BTC/LTC directly
+        const balanceNative = await getBitqueryHistoricalBalance(chain, address, ts);
+
+        return NextResponse.json({
+          chain,
+          network,
+          address,
+          date,
+          timestamp: ts,
+          blockNumber: historicalBlockNumber,
+          balance: balanceNative.toFixed(8), // Format to 8 decimals
+          symbol: chain === 'bitcoin' ? 'BTC' : 'LTC',
+          rawBalance: balanceNative.toString(),
+          note: 'Historical balance calculated via Bitquery (Sum Inputs/Outputs)'
+        });
+      } catch (e) {
+        console.error(`${chain} balance error`, e);
+        throw new Error(`Failed to fetch ${chain} balance: ${e.message}`);
+      }
+    }
 
     if (chain === 'tron') {
       symbol = 'TRX';
