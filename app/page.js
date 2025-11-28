@@ -69,7 +69,7 @@ export default function Home() {
                             id="address"
                             name="address"
                             type="text"
-                            placeholder={formData.chain === 'tron' ? 'T...' : '0x...'}
+                            placeholder={formData.chain === 'tron' ? 'T...' : (formData.chain === 'bitcoin' || formData.chain === 'litecoin') ? 'Address...' : '0x...'}
                             required
                             value={formData.address}
                             onChange={handleChange}
@@ -117,7 +117,9 @@ export default function Home() {
                                 { id: 'ethereum', name: 'Ethereum', icon: '/icons/ethereum.png' },
                                 { id: 'polygon', name: 'Polygon', icon: '/icons/polygon.png' },
                                 { id: 'bsc', name: 'BSC', icon: '/icons/bsc.png' },
-                                { id: 'tron', name: 'Tron', icon: '/icons/tron.png' }
+                                { id: 'tron', name: 'Tron', icon: '/icons/tron.png' },
+                                { id: 'bitcoin', name: 'Bitcoin', icon: '/icons/bitcoin.png' },
+                                { id: 'litecoin', name: 'Litecoin', icon: '/icons/litecoin.png' }
                             ].map((chain) => (
                                 <div
                                     key={chain.id}
@@ -161,6 +163,7 @@ export default function Home() {
                                 placeholder="Native if empty"
                                 value={formData.tokenAddress}
                                 onChange={handleChange}
+                                disabled={formData.chain === 'bitcoin' || formData.chain === 'litecoin'}
                             />
                         </div>
                     </div>
